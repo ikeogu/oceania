@@ -1,0 +1,51 @@
+2.99 Fri 13 May 2022 09:48:42 AM +08
+- Reverted to qty in locprod_productledger and openitem_productledger
+
+2.95 Thu 05 May 2022 05:38:43 AM +08
+- Removed Litre converter, zero
+
+2.94 Thu 05 May 2022 05:00:31 AM +08
+- Moved today cabinet, drawer and screend to Header
+- Moved CStore, H2, EV, Parking to ScreenD
+
+2.85 Mon 25 Apr 2022 03:49:10 AM +08
+1. Implemented 9 Principles on the main Fuel Page
+
+2.82 Thu 21 Apr 2022 09:31:55 PM +08
+1. Major face lift of Fuel Page
+- Removed pump button to avoid Cancel/void bug
+- Moved pump selection to product button
+- New bug: Can't authorize second transaction onwards
+2. Started Receiving Note
+3. Started Cost ValueCost Report
+4. Started Audit Report
+5. Started Credit Account Statement
+6. Fixed login bug by deprecating Oceania's login/logout
+7. OPT/EPS Integration: Reached final delivery notification to EPS
+
+
+a81: Sat 16 Apr 2022 09:55:05 PM +08
+- PS fixed safe drop input size params validation
+- Full Tank Receipt list now follows the same date as was selected for fuel
+  receipt
+- PS CStore Total now collects all the staff (instead of just the staff on
+  the active terminal)
+- PS Fuel products now collect all the staff (instead of just the staff on
+  the active terminal)
+- Excel export for Fuel Receipt List: completed Excel template, no data yet
+- Excel export for Fuel Full Tank Receipt List: completed Excel template, no data yet
+
+
+
+a28: Thu 22 Apr 2021 05:41:33 PM +08
+Version just before Mudasir's comeback with uncommited files
+
+v2.1 Wed 27 Jan 2021 11:44:37 AM +08
+- Added Custom Preset by Litre
+- Added Sales Report
+
+Silver Dollar
+- v1.1 Added Net Litre and Net Branch Sales
+- v1.2 Fixed Net Qty, Net Branch Sales and Refund using the new receipt_id
+
+

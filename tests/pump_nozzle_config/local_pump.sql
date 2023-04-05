@@ -1,0 +1,14 @@
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (1,'1220000000507',1,1,15,5,1,1,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (2,'1220000000508',1,2,15,5,1,2,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (3,'1220000000509',1,3,15,5,1,3,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (4,'1220000000510',1,4,15,5,1,4,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (5,'1220000000511',1,5,15,5,1,5,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (6,'1220000000512',1,6,15,5,1,6,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (9,'1220000000513',1,9,15,5,1,9,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (10,'1220000000514',1,10,15,5,1,10,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (11,'1220000000515',1,11,15,5,1,11,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (12,'1220000000516',1,12,15,5,1,12,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (13,'1220000000517',1,13,15,5,1,13,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (14,'1220000000518',1,14,15,5,1,14,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (17,'1220000000519',1,17,15,5,1,17,now(),now());
+insert into local_pump (id,systemid,controller_id,pump_no,pts2_protocol_id,baudrate,pump_port,comm_address,created_at,updated_at) values (18,'1220000000520',1,18,15,5,1,18,now(),now());

@@ -1,0 +1,526 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Models\Company;
+use App\Models\Location;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use PDF;
+
+class ReportController extends Controller
+{
+    //
+    public function getReport()
+    {
+        $company = Company::first();
+        $approvedDate = $company->approved_at;
+        return view('report.report', ['approved_at' => $approvedDate]);
+    }
+
+    public function cstorePLPDF(Request $request)
+    {
+        Log::info('***** cstorePLPDF: START *****');
+        Log::info('Request: ' . json_encode($request->all()));
+
+        $company = Company::first();
+        $currency = $company->currency->code ?? 'MYR';
+
+        //Change date Format
+        $requestValue = $request->all();
+
+        if (!$request->ev_start_date) {
+            $request->ev_start_date = date('Y-m-d');
+        }
+        if (!$request->ev_end_date) {
+            $request->ev_end_date = date('Y-m-d');
+        }
+
+        $start = date('Y-m-d', strtotime($request->ev_start_date));
+        $stop = date('Y-m-d', strtotime($request->ev_end_date));
+
+        $start = $start . ' 00:00:00';
+        $stop = $stop . ' 23:59:59';
+
+        Log::debug('Start Date: ' . $start);
+        Log::debug('Stop Date: ' . $stop);
+
+        $location = Location::first();
+        $products = $this->getAllProducts();
+        $records = $this->mapTrxReceiptProducts($products, $start, $stop);
+
+        $report_details = $records;
+
+        $report_details = $report_details->map(function ($product) {
+            return (object) [
+                'z_product_id' => $product->z_product_id,
+                'systemid' => $this->getProductBarcode(
+                    $product->z_product_id,
+                    $product->systemid
+                ),
+                'name' => $product->name,
+                'qty' => $product->qty,
+                'cost' => $product->cost,
+                'price' => $product->price,
+                'profit_loss' => $product->profit_loss,
+            ];
+        });
+
+        $pdf = PDF::setOptions([
+            'isHtml5ParserEnabled' => true,
+            'isRemoteEnabled' => true
+        ])->loadView(
+                'report.cstore_profit_loss_pdf',
+                compact(
+                    'currency',
+                    'report_details',
+                    'requestValue',
+                    'location'
+                )
+            );
+
+        $pdf->setPaper('A4', 'portrait');
+        ini_set('memory_limit', '-1');
+        $ret = $pdf->download('C-StoreProfitLoss.pdf');
+
+        Log::info('***** cstorePLPDF: END *****');
+
+        return $ret;
+    }
+
+
+    private function mapTrxReceiptProducts($products, $start, $stop)
+    {
+        $result = collect();
+        foreach ($products as $prd) {
+            $t = $this->getCstoreReceiptProducts($prd, $start, $stop);
+            $t = collect($t);
+            $result = $result->merge($t);
+        }
+
+        return $result;
+    }
+
+    private function costLineExists($systemid, $cost, $price, $values)
+    {
+        $index = 0;
+        $element = null;
+        foreach ($values as $key => $value) {
+            if (
+                $value->systemid == $systemid
+                && $value->cost == $cost
+                && $value->price == $price
+            ) {
+                $element = $value;
+                break;
+            }
+
+            $index++;
+        }
+
+        return (object) ['index' => $index, 'element' => $element, 'size' => (!is_null($element)) ? 1 : 0];
+    }
+
+    private function getCstoreReceiptProducts($product, $start, $stop)
+    {
+        //Log::info("***** getCstoreReceiptProducts: START ***** ");
+        $result = [];
+        $product_id = $product->id;
+        $transactions = DB::table('cstore_receiptproduct')
+            ->where('product_id', $product_id)
+            ->whereBetween('created_at', [$start, $stop])
+            ->get();
+
+        //Log::info("getCstoreReceiptProducts: transactins=".$transactions->count());
+
+        if (sizeof($transactions) > 0) {
+
+            //Log::info("getCstoreReceiptProducts: Loop through transactions");
+
+            foreach ($transactions as $trx) {
+                $cost_lines = [];
+                if ($product->ptype == "openitem") {
+                    $cost_lines = DB::select(DB::raw("
+                        SELECT
+                            ocr.openitemcost_id,
+                            ocr.csreceipt_id,
+                            ocr.qty_taken,
+                            oc.cost /100 as cost,
+                            p.name, p.id as product_id
+                        FROM openitemcost_qtydist ocr
+                        LEFT JOIN openitem_cost oc ON oc.id = ocr.openitemcost_id
+                        LEFT JOIN openitem_productledger opl ON opl.id = oc.openitemprodledger_id
+                        LEFT JOIN stockreport sr ON sr.id = opl.stockreport_id
+                        LEFT JOIN stockreportproduct srp ON srp.id = sr.id
+                        LEFT JOIN product p ON p.id = srp.product_id
+
+                        WHERE ocr.csreceipt_id = $trx->receipt_id
+                        AND p.id = $product_id;
+                    "));
+                } elseif ($product->ptype == "inventory") {
+                    $cost_lines = DB::select(DB::raw("
+                        SELECT
+                            ocr.locprodcost_id,
+                            ocr.csreceipt_id,
+                            ocr.qty_taken,
+                            oc.cost /100 as cost,
+                            p.name, p.id as product_id
+                        FROM locprodcost_qtydist ocr
+                        LEFT JOIN locationproduct_cost oc ON oc.id = ocr.locprodcost_id
+                        LEFT JOIN locprod_productledger opl ON opl.id = oc.locprodprodledger_id
+                        LEFT JOIN stockreport sr ON sr.id = opl.stockreport_id
+                        LEFT JOIN stockreportproduct srp ON srp.id = sr.id
+                        LEFT JOIN product p ON p.id = srp.product_id
+
+                        WHERE ocr.csreceipt_id = $trx->receipt_id
+                        AND p.id = $product_id;
+                    "));
+                }
+
+                foreach ($cost_lines as $ct) {
+                    $price = $trx->price / 100;
+                    $exists = $this->costLineExists(
+                        $product->systemid,
+                        $ct->cost,
+                        $price,
+                        $result
+                    ); # [index, element, size] (object)
+                    if ($exists->size > 0) {
+                        $record = $result[$exists->index];
+                        $record->qty = $record->qty + $ct->qty_taken;
+                        $record->profit_loss = ($record->price - $record->cost) * $record->qty;
+                        $result[$exists->index] = $record;
+                    } else {
+                        array_push($result, (object) [
+                            'name' => $product->name,
+                            'barcode' => $product->barcode,
+                            'systemid' => $product->systemid,
+                            'cost' => $ct->cost,
+                            'price' => $price,
+                            'qty' => $ct->qty_taken,
+                            'z_product_id' => $product->id,
+                            'profit_loss' => ($price - $ct->cost) * $ct->qty_taken,
+                        ]);
+                    }
+                }
+            }
+            //Log::info("getCstoreReceiptProducts:end Loop");
+
+        } else {
+            array_push($result, (object) [
+                'name' => $product->name,
+                'barcode' => $product->barcode,
+                'systemid' => $product->systemid,
+                'cost' => 0,
+                'qty' => 0,
+                'price' => 0,
+                'z_product_id' => $product->id,
+                'profit_loss' => 0,
+            ]);
+        }
+        //Log::info("***** getCstoreReceiptProducts: END *****");
+        return $result;
+    }
+
+    public function getProductBarcode($id, $systemid)
+    {
+        $barcode = DB::table('productbarcode')
+            ->where('product_id', $id)
+            ->where('selected', 1)
+            ->first();
+
+        if (!is_null($barcode)) {
+            return $barcode->barcode;
+        } else {
+            return $systemid;
+        }
+    }
+
+
+    public function cost_value_reportPDF(Request $request)
+    {
+        Log::info('***** cost_value_reportPDF: START *****');
+        Log::info('Request: ' . json_encode($request->all()));
+        $company = Company::first();
+        $location = DB::table('location')->first();
+        $currency = $company->currency->code ?? 'MYR';
+
+        //Change date Format
+        is_null($request->year) ? $start_d = date("Y-m-01") :
+            $start_d = $request->year . '-' . $request->month . '-01';
+
+        $requestValue = [
+            'start_date' => date('Y-m-01', strtotime($start_d)),
+            'end_date' => date('Y-m-t', strtotime($start_d)),
+        ];
+
+        $start = date('Y-m-01', strtotime($start_d));
+        $end = date('Y-m-t', strtotime($start_d));
+        $end_D = date('1970-Jan-01');
+
+        Log::info("cost_value_reportPDF: start inventory_product");
+
+        $inv_and_open_products = collect(DB::select(DB::raw("
+            SELECT
+                p.id,
+                p.systemid,
+                p.name,
+                lpc.cost as Icost,
+                lp.costvalue as Icostvalue,
+                lpr.recommended_price as Iprice,
+                lpc.balance as  Iqty,
+                null as barcode
+            FROM
+                prd_inventory pr_i
+            LEFT JOIN
+                product p ON p.id = pr_i.product_id
+            LEFT JOIN
+                localprice lpr ON lpr.product_id = pr_i.product_id
+            LEFT JOIN
+                locationproduct lp ON lp.product_id = pr_i.product_id
+            LEFT JOIN
+                locprod_productledger lpl ON lpl.product_systemid = p.systemid
+            LEFT JOIN
+                locationproduct_cost lpc ON lpc.locprodprodledger_id =lpl.id
+            WHERE lpc.updated_at BETWEEN '" . $end_D . "  00:00:00' AND '" . $end . " 23:59:59'
+            UNION
+            SELECT
+                p.id,
+                p.systemid,
+                    p.name,
+                    p_o.costvalue as Icostvalue,
+                    p_o.price as Iprice,
+                    opc.cost as Icost,
+                    opc.balance as Iqty,
+                    null as barcode
+            FROM
+                prd_openitem p_o
+            LEFT JOIN
+                product p ON p.id = p_o.product_id
+            LEFT JOIN
+                openitem_productledger opl ON opl.product_systemid =p.systemid
+            LEFT JOIN
+                openitem_cost opc ON opc.openitemprodledger_id = opl.id
+            WHERE opc.updated_at is not NULL  AND
+            opc.updated_at BETWEEN '" . $end_D . "  00:00:00' AND '" . $end . " 23:59:59'
+            ;
+        ")));
+
+        Log::info("cost_value_reportPDF: inv_and_open_products=" .
+            count($inv_and_open_products));
+
+        $inv_and_open_products = $this->collectionReceiver($inv_and_open_products);
+
+        Log::info("cost_value_reportPDF: op_it=" . count($inv_and_open_products));
+
+        foreach ($inv_and_open_products as $key => $p) {
+            # code...
+            $p->barcode = $this->get_barcode($p->id);
+        }
+
+        Log::info("cost_value_reportPDF: start allProducts");
+
+        $allproducts = $this->getAllProducts();
+
+        Log::info("cost_value_reportPDF: allproducts=" . count($allproducts));
+
+        $filtered_collection = $allproducts->filter(function ($item) use ($inv_and_open_products) {
+            $ids = $inv_and_open_products->pluck('id')->toArray();
+            return !in_array($item->id, $ids);
+        })->values();
+
+        Log::info("cost_value_reportPDF: end filtered_array");
+
+        $openitem_prod = $filtered_collection->merge($inv_and_open_products);
+
+        Log::info("cost_value_reportPDF: end merged allfiltered_collection");
+        Log::info("cost_value_reportPDF: openitem_prod=" . count($openitem_prod));
+
+        $pdf = PDF::setOptions([
+            'isHtml5ParserEnabled' => true,
+            'isRemoteEnabled' => true
+        ])->loadView('report.cost_value_rpt_pdf', compact(
+                'openitem_prod',
+                'requestValue',
+                'location',
+                'currency'
+            ));
+        $pdf->setPaper('A4', 'portrait');
+        ini_set('memory_limit', '-1');
+        $ret = $pdf->download('CostValueReport.pdf');
+
+        Log::info('***** cost_value_reportPDF: END *****');
+
+        return $ret;
+    }
+
+
+    public function getAllProducts()
+    {
+        Log::info('***** getAllProducts: START *****');
+
+        $data = collect(DB::select(DB::raw("
+            SELECT
+                p.id,
+                p.systemid,
+                p.name,
+                ptype as ptype,
+                null as Icostvalue,
+                null as Iprice,
+                null as Icost,
+                null as Iqty,
+                IFNULL(b.barcode,NULL) as  barcode
+            FROM
+                product p,
+                prd_inventory pr_i
+            LEFT JOIN
+                productbarcode b ON b.product_id = pr_i.product_id AND
+                b.selected = 1 AND
+                b.deleted_at is null
+            WHERE
+                pr_i.product_id = p.id
+            UNION
+            SELECT
+                p.id,
+                p.systemid,
+                p.name,
+                ptype as ptype,
+                null as Icostvalue,
+                null as Iprice,
+                null as Icost,
+                null as Iqty,
+                IFNULL(b.barcode,NULL) as  barcode
+            FROM
+                product p,
+                prd_openitem p_o
+            LEFT JOIN
+                productbarcode b ON b.product_id = p_o.product_id AND
+                b.selected = 1 AND
+                b.deleted_at is null
+
+            WHERE
+                p_o.product_id = p.id
+            ;
+        ")))->unique('id');
+
+        Log::info('getAllProducts: END ');
+
+        return $data;
+    }
+
+    public function collectionReceiver($collect)
+    {
+        Log::info("***** collectionReceiver: START *****");
+
+        $new_arr = collect();
+        foreach ($collect->values()->all() as $key => $value) {
+            # code...
+            if (
+                $new_arr->where('id', $value->id)->where('Icost', $value->Icost)->count() > 0
+            ) {
+                # code...
+
+                $h = $new_arr->where('id', $value->id)->where('Icost', $value->Icost)->first();
+
+                $h->Iqty += $value->Iqty;
+                continue;
+            }
+            $new_arr->push($value);
+        }
+        Log::info("collectionReceiver: new_arr=" . count($new_arr));
+
+        Log::info("***** collectionReceiver: END *****");
+
+        return $new_arr;
+    }
+
+    public function collection_transformer($collect)
+    {
+        $new_arr = collect();
+        foreach ($collect->values()->all() as $key => $value) {
+            # code...
+            if (
+                $new_arr->where('id', $value->id)->where('price', $value->price)->count() > 0
+            ) {
+                # code...
+                $h = $new_arr->where('id', $value->id)->where('price', $value->price)->where('cost', $value->cost)->first();
+                if ($h) {
+                    $h->qty += $value->qty;
+                    $h->profit_loss += $value->profit_loss;
+                }
+
+                continue;
+            }
+            $new_arr->push($value);
+        }
+        return $new_arr;
+    }
+
+
+    public function get_barcode($id)
+    {
+
+        $productbarcode = DB::select(
+            // DB::raw("
+            //     select
+            //         JSON_ARRAYAGG(b.barcode) as barcode
+            //     from
+            //         productbarcode b,
+            //         product p
+            //     where
+            //         p.id = b.product_id  and
+            //         p.id ='" . $id . "' and
+            //         b.selected = 1 and
+            //         b.deleted_at is null;
+            // ")
+            DB::raw("
+            select b.barcode as barcode from  productbarcode b, product p where p.id = b.product_id  and p.id ='" . $id . "' and b.selected = 1 and b.deleted_at is null;
+            ")
+        );
+
+        if (sizeof($productbarcode) > 0) {
+            return $productbarcode[0]->barcode;
+        } else {
+            return null;
+        }
+    }
+
+    public function products()
+    {
+        $inventory_details = DB::table('prd_inventory')->leftjoin('locationproduct', 'locationproduct.product_id', '=', 'prd_inventory.product_id')->leftjoin('product', 'locationproduct.product_id', '=', 'product.id')->leftjoin('localprice', 'prd_inventory.product_id', '=', 'localprice.product_id')->leftjoin('locprod_productledger', 'locprod_productledger.product_systemid', '=', 'product.systemid')->leftjoin(
+                'locationproduct_cost',
+                'locationproduct_cost.locprodprodledger_id',
+                '=',
+                'locprod_productledger.id'
+            )->groupBy(
+                'product.id',
+                'product.systemid',
+                'product.name',
+                'localprice.recommended_price',
+                'locationproduct_cost.qty_out',
+                'locationproduct_cost.cost'
+            )->select(
+                'product.id as id',
+                'product.systemid as systemid',
+                'product.name as name',
+                DB::raw('null as price'),
+                DB::raw('null as cost'),
+                DB::raw('null as qty'),
+                DB::raw('null as profit_loss')
+            )->get();
+
+        $openitem_details = DB::table('prd_openitem')->leftjoin('product', 'prd_openitem.product_id', '=', 'product.id')->leftjoin('openitem_productledger', 'openitem_productledger.product_systemid', '=', 'product.systemid')->leftjoin('openitem_cost', 'openitem_cost.openitemprodledger_id', '=', 'openitem_productledger.id')->groupBy('product.id', 'product.systemid', 'product.name', 'prd_openitem.price', 'openitem_cost.qty_out', 'openitem_cost.cost')->select(
+                'product.id as id',
+                'product.systemid as systemid',
+                'product.name  as name',
+                DB::raw('null as price'),
+                DB::raw('null as cost'),
+                DB::raw('null as qty'),
+                DB::raw('null as profit_loss')
+            )->get();
+
+        $data = $inventory_details->merge($openitem_details);
+        return $data;
+    }
+}
