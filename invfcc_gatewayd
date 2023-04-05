@@ -1,3 +1,0 @@
-#!/bin/sh
-
-/usr/bin/php /home/user/oceania/trunk/oceania/artisan invfcc:gateway 
